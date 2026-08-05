@@ -127,6 +127,16 @@ function vcps_uninstall_site(): bool {
 	// plugin's wp_theme term (see
 	// Petsync_Templates::get_customized_template()); inert without
 	// the plugin.
+	//
+	// Every name this plugin has filed templates under, not just the current
+	// one — migration 4 normally consolidates them, but it only runs while the
+	// plugin is active, so an install deleted before it ever loaded an admin
+	// page still has customizations under a legacy term. Same reasoning as the
+	// legacy option names below. The list is duplicated from
+	// Petsync_Templates::LEGACY_NAMESPACES because the plugin is not loaded
+	// during uninstall and the constant is unreachable here.
+	$theme_names = array( 'shelter-pets', 'shelter-pet-sync', 'vcpahumane-pet-sync' );
+
 	$template_ids = get_posts(
 		array(
 			'post_type'      => array( 'wp_template', 'wp_template_part' ),
@@ -138,7 +148,7 @@ function vcps_uninstall_site(): bool {
 			array(
 				'taxonomy' => 'wp_theme',
 				'field'    => 'name',
-				'terms'    => 'shelter-pets',
+				'terms'    => $theme_names,
 			),
 			),
 		)
@@ -148,9 +158,11 @@ function vcps_uninstall_site(): bool {
 		wp_delete_post( $template_id, true );
 	}
 
-	$theme_term = get_term_by( 'name', 'shelter-pets', 'wp_theme' );
-	if ( $theme_term ) {
-		wp_delete_term( $theme_term->term_id, 'wp_theme' );
+	foreach ( $theme_names as $theme_name ) {
+		$theme_term = get_term_by( 'name', $theme_name, 'wp_theme' );
+		if ( $theme_term ) {
+			wp_delete_term( $theme_term->term_id, 'wp_theme' );
+		}
 	}
 
 	// Options (including the settings that held the opt-in itself).

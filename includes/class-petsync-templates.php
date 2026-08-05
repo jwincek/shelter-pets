@@ -16,6 +16,39 @@ if ( ! defined( 'ABSPATH' ) ) {
 
 class Petsync_Templates {
 
+	/**
+	 * The `wp_theme` term this plugin's templates are filed under.
+	 *
+	 * The Site Editor stores a customized plugin template as a wp_template or
+	 * wp_template_part post assigned to a wp_theme term named after the plugin
+	 * — not after the active theme. That term name is therefore a STORAGE KEY,
+	 * not a label: change it and every existing customization stops being
+	 * found, silently, and the front end quietly falls back to the bundled
+	 * file.
+	 *
+	 * That has already happened twice (see LEGACY_NAMESPACES), because the name
+	 * was written out in three separate places and only some of them were
+	 * updated. It lives here now so a rename is one edit, and so the migration
+	 * that repairs the damage can agree with the lookup by construction.
+	 */
+	public const THEME_NAMESPACE = 'shelter-pets';
+
+	/**
+	 * Namespaces this plugin has previously filed templates under.
+	 *
+	 * Taken from git history rather than memory: `vcpahumane-pet-sync` up to
+	 * 2026-07-04, `shelter-pet-sync` from 2026-07-05, and the current name from
+	 * 2026-08-01. Migration 4 re-files anything found under these.
+	 *
+	 * Add the outgoing name here on any future rename — an install can upgrade
+	 * across several renames at once, so this list is cumulative and nothing
+	 * should ever be removed from it.
+	 */
+	public const LEGACY_NAMESPACES = array(
+		'vcpahumane-pet-sync',
+		'shelter-pet-sync',
+	);
+
 	public function __construct() {
 		add_filter( 'get_block_templates', array( $this, 'add_templates' ), 10, 3 );
 		add_filter( 'pre_get_block_file_template', array( $this, 'get_template' ), 10, 3 );
@@ -112,7 +145,7 @@ class Petsync_Templates {
 				array(
 					'taxonomy' => 'wp_theme',
 					'field'    => 'name',
-					'terms'    => 'shelter-pets',
+					'terms'    => self::THEME_NAMESPACE,
 				),
 				),
 			)
@@ -163,8 +196,8 @@ class Petsync_Templates {
 		$content = file_exists( $file ) ? file_get_contents( $file ) : '';
 
 		$template                 = new WP_Block_Template();
-		$template->id             = 'shelter-pets//' . $slug;
-		$template->theme          = 'shelter-pets';
+		$template->id             = self::THEME_NAMESPACE . '//' . $slug;
+		$template->theme          = self::THEME_NAMESPACE;
 		$template->slug           = $slug;
 		$template->source         = 'plugin';
 		$template->type           = $type;

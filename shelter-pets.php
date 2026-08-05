@@ -230,7 +230,7 @@ add_action( 'plugins_loaded', 'petsync_init' );
  * plugin's DATA version and is deliberately independent of the release version
  * in the plugin header — most releases change no stored data at all.
  */
-define( 'PETSYNC_DB_VERSION', 3 );
+define( 'PETSYNC_DB_VERSION', 4 );
 
 /**
  * The ordered migration list.
@@ -247,6 +247,7 @@ function petsync_get_migrations(): array {
 		1 => 'petsync_migrate_1_option_names',
 		2 => 'petsync_migrate_2_provider_meta',
 		3 => 'petsync_migrate_3_default_status',
+		4 => 'petsync_migrate_4_template_namespace',
 	);
 }
 
@@ -396,5 +397,87 @@ function petsync_migrate_3_default_status(): void {
 		}
 
 		wp_set_object_terms( $pet_id, $default, 'pet_status' );
+	}
+}
+
+/**
+ * Migration 4 — carry Site Editor customizations across the plugin's renames.
+ *
+ * The Site Editor stores a customized plugin template as a wp_template or
+ * wp_template_part post filed under a `wp_theme` term named after the PLUGIN,
+ * not the active theme. That term name is a storage key, so each time this
+ * plugin was renamed the lookup started asking for a name nothing was filed
+ * under. The customizations were never deleted — they became unreachable, and
+ * the front end quietly fell back to the bundled template file. Silent, and it
+ * reads as "the design reverted" rather than as an error.
+ *
+ * This happened across two renames (vcpahumane-pet-sync -> shelter-pet-sync ->
+ * shelter-pets) with no migration to carry the term along. An install can be
+ * upgrading across both at once, so every legacy name is checked, oldest first.
+ *
+ * Two paths, because a term name is unique within the taxonomy:
+ *
+ *   - No current term yet: rename the legacy one in place. Cheapest, and it
+ *     preserves every object relationship untouched.
+ *   - A current term already exists: move the posts onto it and drop the empty
+ *     legacy term. This is the partially-migrated case — someone customized a
+ *     template after the rename, so both terms hold real work and neither can
+ *     simply be discarded.
+ *
+ * Idempotent: the legacy term is gone afterwards, so a second run finds nothing.
+ */
+function petsync_migrate_4_template_namespace(): void {
+	if ( ! taxonomy_exists( 'wp_theme' ) ) {
+		return;
+	}
+
+	foreach ( Petsync_Templates::LEGACY_NAMESPACES as $legacy ) {
+		$legacy_term = get_term_by( 'name', $legacy, 'wp_theme' );
+
+		if ( ! $legacy_term instanceof WP_Term ) {
+			continue;
+		}
+
+		$current = get_term_by( 'name', Petsync_Templates::THEME_NAMESPACE, 'wp_theme' );
+
+		if ( ! $current instanceof WP_Term ) {
+			wp_update_term(
+				$legacy_term->term_id,
+				'wp_theme',
+				array(
+					'name' => Petsync_Templates::THEME_NAMESPACE,
+					'slug' => Petsync_Templates::THEME_NAMESPACE,
+				)
+			);
+			continue;
+		}
+
+		// Everything filed under a term named after this plugin belongs to this
+		// plugin, including customizations of templates no longer shipped —
+		// which are exactly the ones a shelter would be upset to lose. Move the
+		// term's whole contents rather than filtering to current slugs.
+		$orphaned = get_posts(
+			array(
+				'post_type'        => array( 'wp_template', 'wp_template_part' ),
+				'post_status'      => 'any',
+				'numberposts'      => -1,
+				'fields'           => 'ids',
+				'suppress_filters' => false,
+				'tax_query'        => array( // phpcs:ignore WordPress.DB.SlowDBQuery.slow_db_query_tax_query -- one-time migration, not a request-path query.
+					array(
+						'taxonomy'         => 'wp_theme',
+						'field'            => 'term_id',
+						'terms'            => $legacy_term->term_id,
+						'include_children' => false,
+					),
+				),
+			)
+		);
+
+		foreach ( $orphaned as $post_id ) {
+			wp_set_object_terms( $post_id, array( $current->term_id ), 'wp_theme', false );
+		}
+
+		wp_delete_term( $legacy_term->term_id, 'wp_theme' );
 	}
 }

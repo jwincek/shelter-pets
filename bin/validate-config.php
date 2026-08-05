@@ -653,6 +653,52 @@ if ( isset( $readme_src ) ) {
 	}
 }
 
+// ── Check 10: uninstall knows every wp_theme namespace ──────────────────────
+//
+// Site Editor customizations are filed under a wp_theme term named after the
+// plugin, so that name is a storage key. Petsync_Templates owns the current
+// name and the historical ones; uninstall.php has to repeat the list, because
+// the plugin is not loaded during uninstall and the constants are unreachable
+// there.
+//
+// A duplicated list is exactly the drift that made migration 4 necessary in the
+// first place, so it is checked rather than trusted. Getting this wrong leaves
+// a deleted plugin's template posts and terms behind in the database.
+$templates_src = $read( 'includes/class-petsync-templates.php' );
+$uninstall_src = $read( 'uninstall.php' );
+
+if ( '' !== $templates_src && '' !== $uninstall_src ) {
+	$declared = [];
+
+	if ( preg_match( "/const\s+THEME_NAMESPACE\s*=\s*'([^']+)'/", $templates_src, $cm ) ) {
+		$declared[] = $cm[1];
+	} else {
+		$add( 'error', 'uninstall', 'Petsync_Templates::THEME_NAMESPACE not found — check 10 cannot verify uninstall coverage.' );
+	}
+
+	if ( preg_match( '/const\s+LEGACY_NAMESPACES\s*=\s*(?:array\(|\[)(.*?)(?:\)|\]);/s', $templates_src, $lm ) ) {
+		preg_match_all( "/'([^']+)'/", $lm[1], $names );
+		$declared = array_merge( $declared, $names[1] );
+	}
+
+	// The list uninstall.php actually deletes.
+	$covered = [];
+	if ( preg_match( '/\$theme_names\s*=\s*(?:array\(|\[)(.*?)(?:\)|\]);/s', $uninstall_src, $um ) ) {
+		preg_match_all( "/'([^']+)'/", $um[1], $un );
+		$covered = $un[1];
+	} else {
+		$add( 'error', 'uninstall', 'uninstall.php has no $theme_names list — Site Editor customizations would be left behind on delete.' );
+	}
+
+	foreach ( array_diff( $declared, $covered ) as $missing ) {
+		$add( 'error', 'uninstall', "wp_theme namespace '$missing' is declared in Petsync_Templates but not deleted by uninstall.php — add it to \$theme_names." );
+	}
+
+	foreach ( array_diff( $covered, $declared ) as $extra ) {
+		$add( 'warning', 'uninstall', "uninstall.php deletes wp_theme namespace '$extra', which Petsync_Templates does not declare — stale entry, or a rename that never reached the constants." );
+	}
+}
+
 // ── Report ───────────────────────────────────────────────────────────────────
 $errors   = array_filter( $issues, static fn( $i ) => $i['level'] === 'error' );
 $warnings = array_filter( $issues, static fn( $i ) => $i['level'] === 'warning' );
